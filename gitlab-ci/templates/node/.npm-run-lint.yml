@@ -1,0 +1,19 @@
+# Requires a parent test stage
+
+lint:
+  stage: test
+  image: node:latest
+  tags:
+    - aws-docker
+
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+
+  before_script:
+  script:
+    - npm install --progress=false
+    - npm run lint
+  cache:
+    paths:
+      - node_modules/

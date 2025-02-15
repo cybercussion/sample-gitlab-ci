@@ -1,0 +1,38 @@
+# This is a Maven build template.
+# You may need to adjust your maven version.  This sould also be externalized if needed as a Env Variable.
+# You need to set MAVEN_REPO_USER and MAVEN_REPO_PASS variables in the group or project in Gitlab CI/CD settings.
+# Tip:
+# This folder has a .m2/settings.xml needed for your project.  You may copy it to your repo.  This template does
+# not automatically use it.
+
+# You'll want to set the following variables in your parent gitlab-ci.yml file:
+# variables:
+#   IMAGE: "maven:3.6.0-jdk-8"
+#   MAVEN_CLI_OPTS: "-s .m2/settings.xml --batch-mode"
+#   MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository -Dmaven.wagon.http.ssl.insecure=true"
+#   DOCKER_HOST: tcp://docker:2375/ # needed for Docker-in-Docker, Kubernetes
+#   DOCKER_DRIVER: overlay2
+# Remember to set the repo user/pass mentioned prior.
+
+# This is a sample build job.  My understanding is Artifactory should get the artifact thru this command.
+mvn_build:
+  stage: build
+  tags:
+    - aws-docker
+
+  except: # Stop this from building if a QA BVT is being ran
+    variables:
+      - $RUN_BVT == "true"
+  image: $IMAGE
+  services:
+    - docker:stable-dind
+  before_script: # If you need to do something before the main script
+    - echo "Skipping before script."
+  script:
+    - mvn $MAVEN_CLI_OPTS clean deploy
+  after_script:  # if you need to do something after the main script
+    - echo "Skipping after script"
+  cache:
+    paths:
+      - .m2/repository/
+      - target/

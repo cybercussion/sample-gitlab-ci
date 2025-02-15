@@ -1,0 +1,38 @@
+# Expects SOLUTION_NAME Defined - Special note - protected variables (group or project) need to be prefixed with $K8S_SECRET_XXXXXX
+taurus:
+  stage: performance
+  
+  tags:
+    - aws-docker
+    
+  # Conditional - only do this when RUN_BVT is true
+  only:
+    variables:
+      - $RUN_BVT == "true"
+  
+  image: 
+    name: blazemeter/taurus:latest
+    entrypoint: [""] # lets override theirs
+  
+  variables:
+    DOCKER_HOST: tcp://docker:2375/ # needed for Docker-in-Docker, Kubernetes
+    DOCKER_DRIVER: overlay2
+  
+  allow_failure: true
+  
+  before_script:
+    - echo "Skipping before script."
+  
+  script:
+    # Set variables to be replaced in downstream reporting.yml
+    - bzt reporting.yml -o modules.blazemeter.token=$BLAZEMETER_TOKEN -o modules.blazemeter.report-name="${SOLUTION_NAME} ${CI_JOB_ID}" -o modules.blazemeter.project="${SOLUTION_NAME}" $SOLUTION_NAME.Performance/$SOLUTION_NAME.jmx
+  
+  after_script:
+    - ls -al /tmp/artifacts
+    - mkdir artifacts
+    - cp /tmp/artifacts/* artifacts/ # You need to move this for gitlab-ci to pick it up below
+  
+  artifacts:
+    expire_in: 1 week
+    paths: 
+      - artifacts/*

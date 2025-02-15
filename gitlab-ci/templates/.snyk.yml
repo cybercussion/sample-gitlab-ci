@@ -1,0 +1,32 @@
+# This is a sample setup for a snyk scan.
+# Requires a SNYK_TOKEN for auth (API Token).
+# Please note for .NET you'd need to actually perform a dotnet restore first.
+
+snyk_test:
+  stage: test  # this is the name of the stage this will fall under
+  
+  tags: 
+    - aws-docker # This is the label/tag of the runner it will use
+  
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+
+  image: node:latest
+  
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+    
+  allow_failure: true
+  
+  services:
+    - docker:stable-dind
+  # End Dockerized
+  
+  before_script:
+    - npm install -g snyk
+    - snyk auth $SNYK_TOKEN
+  
+  script:
+    - snyk test --file=$SOLUTION_NAME.sln

@@ -1,0 +1,56 @@
+# Use cases for this CI:
+# 1. Update projects in a Group ID (if access allowed)
+# 2. Update project by Project ID (if access allowed)
+# Intent is to go to CI/CD/Pipelines and Run Pipeline
+image: ubuntu
+
+default:
+  tags:
+    - prodeast1
+  retry:
+    max: 2
+    when: runner_system_failure
+
+#variables:
+  #GROUP_ID: "16148372" # mwa-templates (default)
+  #PROJ_ID: ""
+
+
+stages:
+  - automation
+
+.devops_template:
+  before_script:
+    - mkdir -p ~/company
+    - mv "$VARIABLES_JSON" ~/company/variables.json # Pulled from CI Variables (file)
+    # Check for curl bash jq needed for API interactions
+    - >
+      if ! [ -x "$(command -v curl)" ]; then
+        if [ -x "$(command -v apk)" ]; then apk add --no-cache bash curl jq; fi
+        if [ -x "$(command -v apt)" ]; then apt-get update && apt-get install -y bash curl jq; fi
+        if [ -x "$(command -v dnf)" ]; then dnf install bash curl jq; fi
+        if [ -x "$(command -v zypper)" ]; then zypper install bash curl jq; fi
+      fi
+
+# Use case: Supply the PROJ_ID variable and it will only update that project 
+update project:
+  extends:
+    - .devops_template
+  stage: automation
+  rules:
+    - if: $PROJ_ID
+    - when: never
+  script:
+    # This will kick off the project settings if the ACCESS_TOKEN has enough permission.
+    - bash ./update-project.sh -p $PROJ_ID
+
+update group projects:
+  extends:
+    - .devops_template
+  stage: automation
+  rules:
+    - if: $GROUP_ID
+    - when: never
+  script:
+    # This will kick off the project settings by GROUP_ID if the ACCESS_TOKEN has enough permission.
+    - bash ./update-projects.sh -g $GROUP_ID

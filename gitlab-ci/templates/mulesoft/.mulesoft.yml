@@ -1,0 +1,28 @@
+# This will only build and deploy if ANYPOINT_TOKEN is set
+# This was used for AppName
+
+build:
+  only:
+    variables:
+      - $ANYPOINT_TOKEN  # This will only deploy on Run Pipeline w/ ANYPOINT_TOKEN set
+  stage: build
+  image: maven:3.6-jdk-8-alpine
+  tags:
+    - aws-docker
+  services:
+    - docker:stable-dind
+  allow_failure: true
+  before_script:
+    - curl -k ${ARTIFACTORY_LIST_URL}${ARTIFACTORY_CORP_CERT_PATH} --output /usr/local/share/ca-certificates/CORP_Root_CA.crt
+    - update-ca-certificates
+    # Major.Minor.Patch.ServicePackNumber-SNAPSHOT where ServicePackNumber is YYYY.MM.DD.50
+    - sed -ie "s/1.0.0-SNAPSHOT/1.0.0-$(date +'%Y%m%d')-$CI_JOB_ID/g" pom.xml
+  script:
+    - mvn -f pom.xml $MAVEN_CLI_OPTS clean install
+    - mvn $MAVEN_CLI_OPTS deploy
+  after_script:
+    - echo "Skipping after script"
+  cache:
+    paths:
+      - .m2/repository/
+      - target/

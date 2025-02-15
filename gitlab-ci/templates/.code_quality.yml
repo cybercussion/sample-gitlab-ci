@@ -1,0 +1,31 @@
+# You also may want to setup a .codeclimate.yml file as part of the project
+# to propertly ignore files/folders or configure the engines etc.
+# https://docs.codeclimate.com/docs/advanced-configuration
+# https://docs.codeclimate.com/docs/supported-languages-for-maintainability
+
+code_quality:
+  stage: test
+  tags:
+    - aws-docker
+
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+      - $SKIP == "true"
+
+  image: docker:stable
+  variables:
+    DOCKER_HOST: tcp://docker:2375/ # needed for Docker-in-Docker, Kubernetes
+    DOCKER_DRIVER: overlay2
+  allow_failure: true
+  services:
+    - docker:stable-dind
+  script:
+    - export SP_VERSION=$(echo "$CI_SERVER_VERSION" | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2-stable/')
+    - docker run
+        --env SOURCE_CODE="$PWD"
+        --volume "$PWD":/code
+        --volume /var/run/docker.sock:/var/run/docker.sock
+        "registry.gitlab.com/gitlab-org/security-products/codequality:$SP_VERSION" /code
+  artifacts:
+    paths: [gl-code-quality-report.json]

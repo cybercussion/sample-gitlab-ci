@@ -1,0 +1,28 @@
+variables:
+  website: "http://yourdomain:8079/router-app2/home"
+  registry: "yourdomain.com"
+  image: "/AppName/vue-demo"
+  GIT_SUBMODULE_STRATEGY: "recursive"
+
+stages:
+  - test
+  - build
+  - register
+  - performance
+
+include:
+  # Test / Scans
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/node/.npm-run-lint.yml
+
+  # Security Test Scans
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.sast.yml
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.code_quality.yml
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.license_check.yml
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.dependency_scanning.yml
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.dast.yml
+
+  # Build (Dockerfile) - will add to Gitlab Registry
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.build_dockerfile.yml
+
+  # Performance can run after a deploy or against a URL
+  - https://yourdomain.com/gitlab-ci/templates/raw/master/.performance.yml

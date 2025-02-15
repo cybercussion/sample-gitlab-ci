@@ -1,0 +1,259 @@
+# Specify which gitlab runners to use. "prod" here does not relate to phoenix
+# envs, it's the tag used by app for the consumer-ready EKS cluster
+image: registry.gitlab.com/company/cicd/cli/app:2.7.6
+default:
+  tags:
+    - prod
+
+variables:
+  TIER: nonproda
+  CI_EXTERNAL_PULL_REQUEST_IID_PARENT: $CI_EXTERNAL_PULL_REQUEST_IID
+
+stages:
+  - cookiecutter
+  - trigger
+
+# Begin Inline Templates
+.app-deps:
+  stage: cookiecutter
+  before_script:
+    - asdf local python 3.7.5
+    - pip3 install cookiecutter -q
+    - asdf reshim python
+    - app vault-creds --tier $TIER --outputPath /tmp/creds.out
+    - source /tmp/creds.out
+    # todo: Determine if example above can move to before_script to share functionality (out of scope)
+
+.group-server-rules:
+  rules:
+    - if: $CI_EXTERNAL_PULL_REQUEST_IID || $CI_MERGE_REQUEST_ID
+      changes:
+        - group-server/**/*
+    - if: $CI_PIPELINE_SOURCE == 'trigger'
+
+.group-module-rules:
+  rules:
+    - if: $CI_EXTERNAL_PULL_REQUEST_IID || $CI_MERGE_REQUEST_ID
+      changes:
+        - group-module/**/*
+    - if: $CI_PIPELINE_SOURCE == 'trigger'
+
+.srvc-python-rules:
+  rules:
+    - if: $CI_EXTERNAL_PULL_REQUEST_IID || $CI_MERGE_REQUEST_ID
+      changes:
+        - srvc-python/**/*
+    - if: $CI_PIPELINE_SOURCE == 'trigger'
+
+.ecs-srvc-python-rules:
+  rules:
+    - if: $CI_EXTERNAL_PULL_REQUEST_IID || $CI_MERGE_REQUEST_ID
+      changes:
+        - ecs-srvc-python/**/*
+    - if: $CI_PIPELINE_SOURCE == 'trigger'
+
+.mfe-rules:
+  rules:
+    - if: $CI_EXTERNAL_PULL_REQUEST_IID || $CI_MERGE_REQUEST_ID
+      changes:
+        - mfe/**/*
+    - if: $CI_PIPELINE_SOURCE == 'trigger'
+# End Inline Templates
+
+# Detect changes made to group-module
+group-module:
+  extends:
+    - .app-deps
+    - .group-module-rules
+  script:
+    - echo "group-module folder has changed!"
+    - if [ -d "group-module-app" ]; then exit 0; fi
+    # these cookiecutter parameters are intended for template Test Automation to override the default cookiecutter parameters used by template consumers
+    - cookiecutter --no-input ./ --directory group-module repositoryName=group-module-app productName=app teamNickName=app teamName="App Platform" awsAccountNickName=app awsAccountIdNonProd=${nonprodappAWS}
+  # This will make the created template available to the child pipeline
+  cache:
+    key: TEST-AUTOMATION-${CI_COMMIT_SHORT_SHA}-group-module-app
+    paths:
+      - group-module-app/
+  # This will make the trigger for child pipeline work
+  artifacts:
+    paths:
+      - group-module-app/.gitlab-ci.yml
+    when: always
+    expire_in: 1 hour
+
+# Detect changes made to group-server
+group-server:
+  extends:
+    - .app-deps
+    - .group-server-rules
+  script:
+    - echo "group-server folder has changed!"
+    - if [ -d "group-server-app" ]; then exit 0; fi
+    # these cookiecutter parameters are intended for template Test Automation to override the default cookiecutter parameters used by template consumers
+    - cookiecutter --no-input ./ --directory group-server repositoryName=group-server-app productName=app teamNickName=app teamName="App Platform" awsAccountNickName=app awsAccountIdNonProd=${nonprodappAWS} awsVpcIdNonProd=${nonprodappVPCID} businessApplicationName="app - group GraphQL Server" businessCostCenter=${businessCostCenter} businessProjectCode=${businessProjectCode}
+    # group-server has a group-static folder for graphql playground at 32MB.  Need to delete this for artifact limits 5MB
+    - rm -r group-server-app/group-static
+  # This will make the created template available to the child pipeline
+  cache:
+    key: TEST-AUTOMATION-${CI_COMMIT_SHORT_SHA}-group-server-app
+    paths:
+      - group-server-app/
+  # This will make the trigger for child pipeline work
+  artifacts:
+    paths:
+      - group-server-app/.gitlab-ci.yml
+    when: always
+    expire_in: 1 hour
+
+# Detect changes made to srvc-python
+srvc-python:
+  extends:
+    - .app-deps
+    - .srvc-python-rules
+  script:
+    - echo "srvc-python folder has changed!"
+    - if [ -d "srvc-python-app" ]; then exit 0; fi
+    # these cookiecutter parameters are intended for template Test Automation to override the default cookiecutter parameters used by template consumers
+    - cookiecutter --no-input ./ --directory srvc-python repositoryName=srvc-python-app productName=app teamNickName=app teamName="App Platform" awsAccountNickName=app awsAccountIdNonProd=${nonprodappAWS} awsVpcIdNonProd=${nonprodappVPCIDPy} awsRegionNonProd="us-east-1" awsRoute53HostedZoneIdNonProd=${awsRoute53HostedZoneIdNonprod} datalakeFireHoseArnNonProd=${datalakeFireHoseArnNonProd} awsCertificateArnNonProd=${awsCertificateArnNonrprod} rootDomainName=${rootDomainName} pagerDutyIntegrationKeySecretName="group-pagerduty-integration-key" businessCostCenter=${businessCostCenter} businessProjectCode=${businessProjectCode} securityDataClassification="internal" securityCompliance="none"
+  # This will make the created template available to the child pipeline
+  cache:
+    key: TEST-AUTOMATION-${CI_COMMIT_SHORT_SHA}-srvc-python-app
+    paths:
+      - srvc-python-app/
+  # This will make the trigger for child pipeline work
+  artifacts:
+    paths:
+      - srvc-python-app/.gitlab-ci.yml
+    when: always
+    expire_in: 1 hour
+
+# Detect changes made to ecs-srvc-python
+ecs-srvc-python:
+  extends:
+    - .app-deps
+    - .ecs-srvc-python-rules
+  script:
+    - echo "ecs-srvc-python folder has changed!"
+    - if [ -d "ecs-srvc-python-app" ]; then exit 0; fi
+    - cookiecutter --no-input ./ --directory ecs-srvc-python repositoryName=ecs-srvc-python-app productName=app teamNickName=app teamName="App Platform" awsAccountNickName=app awsAccountIdNonProd=${nonprodappAWS} awsVpcIdNonProd=${nonprodappVPCID} datalakeFireHoseArnNonProd=${datalakeFireHoseArnNonProd} businessCostCenter=${businessCostCenter} businessProjectCode=${businessProjectCode}
+  # This will make the created template available to the child pipeline
+  cache:
+    key: TEST-AUTOMATION-${CI_COMMIT_SHORT_SHA}-ecs-srvc-python-app
+    paths:
+      - ecs-srvc-python-app/
+  # This will make the trigger for child pipeline work
+  artifacts:
+    paths:
+      - ecs-srvc-python-app/.gitlab-ci.yml
+    when: always
+    expire_in: 1 hour
+
+# Detect changes made to mfe
+mfe:
+  extends:
+    - .app-deps
+    - .mfe-rules
+  script:
+    - echo "mfe folder has changed!"
+    - if [ -d "mfe-app" ]; then exit 0; fi
+    # these cookiecutter parameters are intended for template Test Automation to override the default cookiecutter parameters used by template consumers
+    - cookiecutter --no-input ./ --directory mfe repositoryName=mfe-app productName=app teamNickName=app teamName="App Platform" domainPrefix="mfe-app" awsAccountNickName=app awsAccountIdNonProd=${nonprodappAWS} awsVpcIdNonProd=${nonprodappVPCID} datalakeFireHoseArnNonProd=${datalakeFireHoseArnNonProd} businessCostCenter=${businessCostCenter} businessProjectCode=${businessProjectCode}
+  # This will make the created template available to the child pipeline
+  cache:
+    key: TEST-AUTOMATION-${CI_COMMIT_SHORT_SHA}-mfe-app
+    paths:
+      - mfe-app/
+  # This will make the trigger for child pipeline work
+  artifacts:
+    paths:
+      - mfe-app/.gitlab-ci.yml
+    when: always
+    expire_in: 1 hour
+
+# Begin Child Pipelines which need parent job to have artifacts because triggers can't have scripts.
+group-module-check:
+  stage: trigger
+  extends:
+    - .group-module-rules
+  needs:
+    - job: group-module
+      artifacts: true
+      optional: true
+  variables:
+    TEST_AUTOMATION: 'true'
+    TARGET_TEMPLATE: 'group-module-app'
+  trigger:
+    include:
+      - artifact: group-module-app/.gitlab-ci.yml
+        job: group-module
+    strategy: depend
+
+group-server-check:
+  stage: trigger
+  extends:
+    - .group-server-rules
+  needs:
+    - job: group-server
+      artifacts: true
+      optional: true
+  variables:
+    TEST_AUTOMATION: 'true'
+    TARGET_TEMPLATE: 'group-server-app'
+  trigger:
+    include:
+      - artifact: group-server-app/.gitlab-ci.yml
+        job: group-server
+    strategy: depend
+
+srvc-python-check:
+  stage: trigger
+  extends:
+    - .srvc-python-rules
+  needs:
+    - job: srvc-python
+      artifacts: true
+      optional: true
+  variables:
+    TEST_AUTOMATION: 'true'
+    TARGET_TEMPLATE: 'srvc-python-app'
+  trigger:
+    include:
+      - artifact: srvc-python-app/.gitlab-ci.yml
+        job: srvc-python
+    strategy: depend
+
+ecs-srvc-python-check:
+  stage: trigger
+  extends:
+    - .ecs-srvc-python-rules
+  needs:
+    - job: ecs-srvc-python
+      artifacts: true
+      optional: true
+  variables:
+    TEST_AUTOMATION: 'true'
+    TARGET_TEMPLATE: 'ecs-srvc-python-app'
+  trigger:
+    include:
+      - artifact: ecs-srvc-python-app/.gitlab-ci.yml
+        job: ecs-srvc-python
+    strategy: depend
+
+mfe-check:
+  stage: trigger
+  extends:
+    - .mfe-rules
+  needs:
+    - job: mfe
+      artifacts: true
+      optional: true
+  variables:
+    TEST_AUTOMATION: 'true'
+    TARGET_TEMPLATE: 'mfe-app'
+  trigger:
+    include:
+      - artifact: mfe-app/.gitlab-ci.yml
+        job: mfe
+    strategy: depend
+# End Child Pipelines

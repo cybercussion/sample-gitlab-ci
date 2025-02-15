@@ -1,0 +1,24 @@
+license_management:
+  tags:
+    - aws-docker
+  stage: test
+
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+      - $SKIP == "true"
+
+  image: docker:stable
+  variables:
+    DOCKER_HOST: tcp://docker:2375/ # needed for Docker-in-Docker, Kubernetes
+    DOCKER_DRIVER: overlay2
+  allow_failure: true
+  services:
+    - docker:stable-dind
+  script:
+    - export LICENSE_MANAGEMENT_VERSION=$(echo "$CI_SERVER_VERSION" | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2-stable/')
+    - docker run
+        --volume "$PWD:/code"
+        "registry.gitlab.com/gitlab-org/security-products/license-management:$LICENSE_MANAGEMENT_VERSION" analyze /code
+  artifacts:
+    paths: [gl-license-management-report.json]

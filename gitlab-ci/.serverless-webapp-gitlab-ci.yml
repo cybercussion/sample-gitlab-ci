@@ -1,0 +1,77 @@
+variables:
+  website: "https://dev.domain.com"
+  domain: "domain.com"
+  registry: "corp.domain.com"
+  GIT_SUBMODULE_STRATEGY: "recursive"
+  # AWS - need to set these at the Group/Project level
+  AWS_ACCESS_KEY_ID: ""     # Needs to be secret variable in Gitlab Project Variabes
+  AWS_SECRET_ACCESS_KEY: "" # Needs to be secret variable in Gitlab Project Variabes
+  AWS_DEFAULT_REGION: ""
+  AWS_BUCKET: ""            # Assumes cloudformation stack is created (get bucket name)
+  AWS_DISTRIBUTION: ""      # Assumes cloudformation stack is created (get distribution)
+
+# TODO: build-stack job/task:
+# - aws cloudformation deploy --template-file ./joma.cf.yml --stack-name $STACK_NAME --no-fail-on-empty-changeset
+
+# TODO: Possible way to get values by stack-name within in deployment by environment
+# - export APPLICATION_NAME=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='ApplicationName'].OutputValue" --output text`
+# - echo $APPLICATION_NAME
+# - export APPLICATION_ENDPOINT=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='Endpoint'].OutputValue" --output text`
+# - echo $APPLICATION_ENDPOINT
+# - export ENVIRONMENT_NAME=`aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='EnvironmentName'].OutputValue" --output text`
+# - echo $ENVIRONMENT_NAME
+
+stages:
+  - test
+  - build
+  - deploy
+  - performance
+
+# Commenting this out for now
+.deploy_develop:
+  stage: deploy
+  services:
+    - node:latest
+  image: python:latest
+  before_script:
+    - pip install awscli
+  script: 
+    - echo "Deploying to dev"
+    # Empty the S3 Bucket (hint: you could sync instead)
+    - aws s3 rm s3://${AWS_BUCKET}/ --recursive
+    # Need to adjust config.js due to use case (build once promote)
+    - node create.config
+    # Copy up the new build
+    - aws s3 cp ./dist s3://${AWS_BUCKET}/ --recursive
+    # Need to set cache-control headers (Tip: Possible to do --dryrun)
+    - aws s3 s3://${AWS_BUCKET}/ s3://${AWS_BUCKET}/ --metadata-directive REPLACE --exclude "*"" --include "*.png" --include "*.jpg" --include "*.svg" --include ".js" --include ".css" --recursive --cache-control max-age=31536000
+    - aws s3 s3://${AWS_BUCKET}/ s3://${AWS_BUCKET}/ --metadata-directive REPLACE --exclude "*"" --include "config.js" --include "index.html" --recursive --cache-control max-age=0,no-cache,no-store,must-revalidate
+    # Invalidate CloudFront Cache
+    - aws configure set preview.cloudfront true
+    - aws cloudfront create-invalidation --distribution-id ${AWS_DISTRIBUTION} --paths '/*'
+  environment:
+    name: joma-dev
+    url: https://${CI_ENVIRONMENT_NAME}.${domain}
+  after_script:
+    - 
+  only:
+    - develop
+
+include:
+  # Test / Scans
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/node/.npm-run-lint.yml
+
+  # Security Test Scans
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.sast.yml
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.code_quality.yml
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.license_check.yml
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.dependency_scanning.yml
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.dast.yml
+
+  # Build (Dockerfile) - will add to Gitlab Registry
+  #- https://corp.domain.com/gitlab-ci/templates/raw/master/.build_dockerfile.yml
+  # This will not run in a container.  Deploying to cloud via cloudformation (CloudFront, S3)
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/node/.npm-run-build.yml
+
+  # Performance can run after a deploy or against a URL
+  - https://corp.domain.com/gitlab-ci/templates/raw/master/.performance.yml

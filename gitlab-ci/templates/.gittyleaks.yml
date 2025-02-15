@@ -1,0 +1,18 @@
+gittyleaks:
+  stage: test
+  tags:
+    - aws-docker
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+  image: python:3.6
+  variables:
+    DOCKER_HOST: tcp://docker:2375/ # needed for Docker-in-Docker, Kubernetes
+    DOCKER_DRIVER: overlay2
+  allow_failure: true
+  script:
+    - pip3 install gittyleaks
+    - pip3 install ansi2html
+    - gittyleaks | ansi2html >  gittyleaks-report.html
+  artifacts:
+    paths: [gittyleaks-report.html]

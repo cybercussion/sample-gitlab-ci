@@ -1,0 +1,46 @@
+# Requires a Build Stage in partent yaml file.
+# ENV VARS (Settings->CI / CD -> Environment Variables)
+# ARTIFACTORY_LIST_URL - https://yourdomain.com/artifactory/list/
+# ARTIFACTORY_CORP_CERT_PATH - cicd-local-secure/ca.crt
+
+# Tip: If you are using git submodules, you need to also set GIT_SUBMODULE_STRATEGY as a
+#      variable in your parent yaml file.  Use 'normal' or 'recursive'.
+
+build:
+  stage: build
+  image: docker:latest # docker:stable # gitlab/dind
+  
+  tags:
+    - aws-docker
+
+  except: # this will not work when $RUN_BVT is true
+    variables:
+      - $RUN_BVT == "true"
+
+  variables:
+    DOCKER_SERVICE: docker
+    DOCKER_HOST: tcp://${DOCKER_SERVICE}:2375/
+
+    DOCKER_DRIVER: overlay2
+  # DOCKER_TLS_CERTDIR: ""
+
+  services:
+    - name: docker:dind
+      entrypoint: ["dockerd-entrypoint.sh"]
+      command: ["--insecure-registry", "yourdomain.com:4567"]
+
+  before_script:
+    # Need to pull in this cert for CORP because its self-signed/encrypted poorly
+    #- apk add --no-cache curl  # ENABLE IF YOU USE ALPINE
+    #- apt-get update; apt-get install curl # something changed in newer docker, curl is present.  keep a eye on this.
+    #- curl -k ${ARTIFACTORY_LIST_URL}${ARTIFACTORY_CORP_CERT_PATH} --output /usr/local/share/ca-certificates/CORP_Root_CA.crt
+    #- cp /usr/local/share/ca-certificates/CORP_Root_CA.crt .  # maybe we need the cert?
+    #- update-ca-certificates
+    - docker --version
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA --tag $CI_REGISTRY_IMAGE:latest .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE:latest
+    

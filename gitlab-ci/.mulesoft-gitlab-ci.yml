@@ -1,0 +1,74 @@
+# Attn Mulesoft users - you may need to include a .m2/settings.xml file
+# See: https://forums.mulesoft.com/storage/attachments/8565-settings.txt 
+# Also example in a fork in devops group https://yourdomain.com.com/devops/forks/tops-ventiv/blob/gitlab-ci-test/.m2/settings.xml
+
+variables:
+  #MAVEN_REPO_PATH: ""  - currently set at MuleSoft Group
+  MAVEN_CLI_OPTS: "-s .m2/settings.xml --batch-mode"
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository -Dmaven.wagon.http.ssl.insecure=true -Dmaven.wagon.http.ssl.allowall=true -Drepository.password=$MAVEN_REPO_PASS -Drepository.user=$MAVEN_REPO_USER" # Ignore SSL
+  DOCKER_HOST: tcp://docker:2375 # needed for Docker-in-Docker, Kubernetes
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  PROJECT_PATH: "./" # This project was setup with a subfolder
+  
+  # Other used variables from Gitlab -> Settings -> CI / CD -> Environment Variables at group or project level
+
+  # Dev centric variables used for manual Run Pipeline
+  # ANYPOINT_TOKEN (access_token via https://anypoint.mulesoft.com/accounts/api/profile)
+
+# Default Stages
+stages:
+  - test
+  - build
+  - deploy
+  #- performance
+
+# Templates for above stage(s) see: https://docs.gitlab.com/ee/ci/yaml/#include-examples
+include:
+  # Build/Verify Base (extend below)
+  - remote: https://yourdomain.com.com/gitlab-ci/templates/raw/master/mulesoft/.mulesoft_base.yml
+  # TBD - Need to sort out Build call to internal / external CI based on team feedback.
+
+  # Test Stage Gitlab SecOps Scans
+  - template: SAST.gitlab-ci.yml
+  - template: Dependency-Scanning.gitlab-ci.yml
+  - template: License-Management.gitlab-ci.yml
+  - template: Code-Quality.gitlab-ci.yml
+
+# TBD e2e/integration tests - need to sort out postman/newman, mule or other automation
+# Performance Stage
+  #- https://yourdomain.com.com/gitlab-ci/templates/raw/master/.performance.yml   # uses same website/endpoint - front end apps
+
+# This will kick off unit tests i.e. verify
+verify:
+  extends: MuleSoftBase
+  stage: test
+  tags:
+    - aws-docker # Runner tag
+  only:
+    refs:
+      - branches # Make considerations on where this happens 'tags' or regex
+  variables:
+    MVN_CMD: 'verify'
+
+# Build for branch develop
+build:
+  extends: MuleSoftBase
+  tags:
+    - aws-docker # Runner tag
+  stage: build
+  only:
+    - develop
+  variables:
+    MVN_CMD: 'deploy' # could use package, but deploy will place it on repo
+
+# DeployDevelopment TBD
+# This would be rules to deploy to cloudhub env: Development
+
+# DeployRelease TBD
+# This would be rules to deploy to cloudhub env: QA (or SIT??)
+# This logic would use a release/* branch or a 1.x.x tag rule
+
+# DeployProduction TBD
+# This would be rules to deploy to cloudhub env: Production
+# This could be a when: manual stub of the pipeline based on the branch or tag above.

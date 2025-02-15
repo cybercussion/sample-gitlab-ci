@@ -1,0 +1,173 @@
+# BVT Build & Test - dotnet QATests need to be built first
+# This originally ran in windows shell, converted to Linux Docker
+# I left the Windows references/cmd shell commented out.
+
+# Adopts Group Variables: 
+# ARTIFACTORY_LIST_URL
+# ARTIFACTORY_CORP_CERT_PATH
+# ARTIFACTORY_DEV_PEM_PATH
+# BVT_IMAGE
+# TEST_CATEGORY
+
+BVT:
+  stage: BVT
+
+  only: # this will only work when $RUN_BVT is true
+ #   refs:
+ #     - gitlab-ci-test  # todo: open this up to more branches later.
+    variables:
+      - $RUN_BVT == "true"
+
+  # when: manual # Limiting this to a manual pipeline trigger - don't see any other way to make this a condition? Yes - except and only
+  tags: 
+   #- win-shell # you need this to execute a gitlab-runner tagged 'win-shell'
+    - aws-docker
+
+  # Dockerized code block
+  image: $BVT_IMAGE  # microsoft/dotnet:2.0-sdk  # Mark: this does not allow for dotnet tool install, but tests pass
+  # image: microsoft/dotnet:latest   # Mark: this is at the time 2.2.103 and has gss-ntlmssp issues
+  # image: microsoft/dotnet:2.1-sdk
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+  allow_failure: false
+  services:
+    - name: docker:dind
+      entrypoint: ["dockerd-entrypoint.sh"]
+      command: ["--insecure-registry", "yourdomain.com:4567"]
+
+  # End Dockerized 
+
+  before_script:
+    #- echo %SOLUTION_NAME% %TEST_ENV% #Windows needs %VAR%, PowerShell needs $env:VAR, Bash needs $VAR
+    #- export PATH="$PATH:~/.dotnet/tools"
+    - dotnet --info
+    # Fix gss-ntmlssp for 2.1+
+    #- apt-get update && apt-get -y install gss-ntlmssp
+    - echo $SOLUTION_NAME $TEST_ENV
+    # Get the CORP Cert (until someone makes a CORP Image!!)
+    - curl -k ${ARTIFACTORY_LIST_URL}${ARTIFACTORY_CORP_CERT_PATH} --output /usr/local/share/ca-certificates/CORP_Root_CA.crt
+    # Update the Docker containers certs
+    - update-ca-certificates
+    # Get the dev.pem
+    - curl -k ${ARTIFACTORY_LIST_URL}${ARTIFACTORY_DEV_PEM_PATH} --output dev.pem
+    - echo "Restoring Nuget Packages... has dir? "
+    # WinShell
+    #- IF EXIST %SOLUTION_NAME%.QATests ( dotnet restore %SOLUTION_NAME%.QATests\%SOLUTION_NAME%.QATests.csproj --source %NUGET_PATH% ) ELSE ( echo No QATests folder!! )
+    # LinShell
+    - if [ -d "$SOLUTION_NAME.QATests" ]; then dotnet restore $SOLUTION_NAME.QATests/$SOLUTION_NAME.QATests.csproj --source $NUGET_PATH; else echo "No QATests folder!!"; fi
+    # Tweaks for kerberos/cron
+    - export DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+    - /etc/init.d/cron start
+    - kinit -k -t /service_accounts.keytab svc-app
+    - >-
+       if ! klist -t;
+       then
+         echo "kerberos ticket not valid; please check account and try again.";
+         exit 1;
+       else
+         klist;
+       fi
+
+  # Please note if the QATests folder does not exist, thay may mean its missing or not named correctly.
+  script:
+    - echo "QATests Build..."
+    # May need to just specify one folder vs two?
+    #- dotnet build %SOLUTION_NAME%.QATests\%SOLUTION_NAME%.QATests.csproj
+    - dotnet build $SOLUTION_NAME.QATests/$SOLUTION_NAME.QATests.csproj
+    - echo "Starting Tests..."
+    - echo $PWD
+    - mkdir TestResults
+    #- set ENVIRONMENT=%TEST_ENV%
+    - export ENVIRONMENT=$TEST_ENV
+    #- set pem_path=C:\temp\dev.pem
+    - export pem_path=$PWD/dev.pem
+    #- IF EXIST %SOLUTION_NAME%.QATests ( dotnet test %SOLUTION_NAME%.QATests\%SOLUTION_NAME%.QATests.csproj --logger "trx;LogFileName=..\..\TestResults\%SOLUTION_NAME%-%RESULTS_FILE%.trx" ) ELSE ( echo No QATests folder!! )
+    # Altering this to not allow for exit 1 if a pass fails. Result would not allow artifacts to get created.
+    - set +e
+    - if [ -d "$SOLUTION_NAME.QATests" ]; then dotnet test $SOLUTION_NAME.QATests/$SOLUTION_NAME.QATests.csproj --filter TestCategory=$TEST_CATEGORY --logger "trx;LogFileName=../../TestResults/$SOLUTION_NAME-$RESULTS_FILE.trx"; exit 0; else echo "No QATests folder!!"; fi
+  # If a test fails this triggers exit code 1
+  
+  # We still want to convert the trx after the script runs.
+  after_script:
+    # We need to convert the TRX file to JUNIT using XSLT, this will convert it to xml.  See dotnet tool install -g trx2junit
+    # https://github.com/gfoidl/trx2junit
+    # - trx2junit .\TestResults\*.trx
+
+    # Alternative (older, less awesome)
+    #- echo "Convert trx to junit..."
+    #- C:\ProgramData\chocolatey\bin\SaxonHE\bin\transform -s:.\TestResults\%SOLUTION_NAME%-%RESULTS_FILE%.trx -xsl:\Gitlab-Runner-Docker\trx-to-junit.xslt -o:.\TestResults\%SOLUTION_NAME%-%RESULTS_FILE%.xml
+    
+    - dotnet tool install -g trx2junit
+    - ~/.dotnet/tools/trx2junit ./TestResults/*.trx
+    # Please see open issue (at the time ) https://github.com/dotnet/cli/pull/9214 MUST USE FULL PATH
+
+  artifacts:
+    paths:
+    # WinShell
+    #  - TestResults/%SOLUTION_NAME%-%RESULTS_FILE%.trx
+    #  - TestResults/%SOLUTION_NAME%-%RESULTS_FILE%.xml
+    # LinShell
+      - TestResults/*.trx # Recent change creates a prefixed trx file in 2.2+
+      - TestResults/*.xml
+    expire_in: 3 weeks
+    #reports:
+    #  junit: TestResults/%SOLUTION_NAME%-%RESULTS_FILE%.xml
+    #   junit: TestResults/$SOLUTION_NAME-$RESULTS_FILE.xml
+    
+# Need to use dotnet 2.1+ to convert trx to junit, later when this is fixed
+# Remove this, and uncomment the processing above.
+.trx2junit:
+  tags:
+    - aws-docker
+  stage: test
+  # Conditional - only do this when RUN_BVT is true
+  only:
+    variables:
+      - $RUN_BVT == "true"
+  dependencies:
+    - BVT
+  image: microsoft/dotnet:latest
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+  allow_failure: false
+  services:
+    - docker:stable-dind
+  before_script:
+    - export PATH="$PATH:~/.dotnet/tools" # Set the path to dotnet tools
+  script:
+    - dotnet tool install -g trx2junit
+    - ~/.dotnet/tools/trx2junit ./TestResults/*.trx
+  artifacts:
+    paths:
+      - ./TestResults/*.xml
+    expire_in: 3 weeks
+    reports:
+       junit: ./TestResults/*.xml
+  
+junit2html: # this is a commented out stub of converting a junit file to html.
+  tags:
+    - aws-docker
+  stage: test
+  # Conditional - only do this when RUN_BVT is true
+  only:
+    variables:
+      - $RUN_BVT == "true"
+  image: node:latest
+  variables:
+    DOCKER_HOST: tcp://docker:2375/
+    DOCKER_DRIVER: overlay2
+  allow_failure: false
+  services:
+    - docker:stable-dind
+  before_script:
+    - npm install -g junit-viewer
+  script:
+    - junit-viewer --results=./TestResults/*.xml --save=./TestResults/$SOLUTION_NAME-$RESULTS_FILE.html
+  artifacts:
+    paths:
+      - ./TestResults/$SOLUTION_NAME-$RESULTS_FILE.html
+    expire_in: 3 weeks
+  
+# End BVT Build & Test
